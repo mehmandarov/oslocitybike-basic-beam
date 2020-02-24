@@ -65,23 +65,6 @@ public class OsloCityBikeBasic {
 
   
     /**
-     * A PTransform that converts a PCollection containing lines of text into a PCollection of
-     * LinkedHashMap with station availability data.
-     */
-    public static class StationMetadata extends PTransform<PCollection<String>, PCollection<KV<Integer, LinkedHashMap>>> {
-        @Override
-        public PCollection<KV<Integer, LinkedHashMap>> expand(PCollection<String> elements) {
-
-            // Convert lines of text into LinkedHashMap.
-            PCollection<KV<Integer, LinkedHashMap>> stations = elements.apply(
-                    ParDo.of(new ExtractStationMetaDataFromJSON()));
-
-            return stations;
-        }
-    }
-
-  
-    /**
      * Options supported by {@link OsloCityBikeBasic}.
      *
      * <p> Defining your own configuration options. Here, you can add your own arguments
