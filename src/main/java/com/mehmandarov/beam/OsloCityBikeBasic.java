@@ -4,8 +4,15 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.beam.sdk.Pipeline;
 import org.apache.beam.sdk.io.TextIO;
-import org.apache.beam.sdk.options.*;
-import org.apache.beam.sdk.transforms.*;
+import org.apache.beam.sdk.options.Default;
+import org.apache.beam.sdk.options.Description;
+import org.apache.beam.sdk.options.PipelineOptions;
+import org.apache.beam.sdk.options.PipelineOptionsFactory;
+import org.apache.beam.sdk.options.Validation;
+import org.apache.beam.sdk.transforms.DoFn;
+import org.apache.beam.sdk.transforms.MapElements;
+import org.apache.beam.sdk.transforms.ParDo;
+import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
 import org.apache.beam.sdk.values.TypeDescriptor;
@@ -20,40 +27,43 @@ import java.util.Map;
 
 public class OsloCityBikeBasic {
 
-    static class ExtractStationMetaDataFromJSON extends DoFn<String, KV<Integer, LinkedHashMap>> {
+    private static final Logger log = LoggerFactory.getLogger(OsloCityBikeBasic.class);
 
-        private static final Logger log = LoggerFactory.getLogger(ExtractStationMetaDataFromJSON.class);
+    static DoFn<String, KV<Integer, LinkedHashMap>> fnExtractStationMetaDataFromJSON() {
+        return new DoFn<String, KV<Integer, LinkedHashMap>>() {
+            @ProcessElement
+            public void extractStationMetaDataFn(@Element String jsonElement, OutputReceiver<KV<Integer, LinkedHashMap>> receiver) {
+                try {
+                    ObjectMapper objectMapper = new ObjectMapper();
+                    Map<String, ArrayList> map = objectMapper.readValue(jsonElement, new TypeReference<Map<String, Object>>() {
+                    });
+                    for (Object o : map.get("stations")) {
+                        if (o != null) {
+                            LinkedHashMap stationMetaDataItem = (LinkedHashMap) o;
 
-        @ProcessElement
-        public void processElement(@Element String jsonElement, OutputReceiver<KV<Integer, LinkedHashMap>> receiver) {
-            try {
-                ObjectMapper objectMapper = new ObjectMapper();
-                Map<String, ArrayList> map = objectMapper.readValue(jsonElement, new TypeReference<Map<String, Object>>() {});
-                for (Object o : map.get("stations")) {
-                    if (o != null) {
-                        LinkedHashMap stationMetaDataItem = (LinkedHashMap) o;
+                            // simplify the metadata object a bit
+                            stationMetaDataItem.put("station_center_lat",
+                                    ((LinkedHashMap) stationMetaDataItem.getOrDefault("center",
+                                            new LinkedHashMap<String, LinkedHashMap>())).getOrDefault("latitude", ""));
+                            stationMetaDataItem.put("station_center_lon",
+                                    ((LinkedHashMap) stationMetaDataItem.getOrDefault("center",
+                                            new LinkedHashMap<String, LinkedHashMap>())).getOrDefault("longitude", ""));
+                            stationMetaDataItem.remove("center");
+                            stationMetaDataItem.remove("bounds");
 
-                        // simplify the metadata object a bit
-                        stationMetaDataItem.put("station_center_lat",
-                                ((LinkedHashMap) stationMetaDataItem.getOrDefault("center",
-                                        new LinkedHashMap<String, LinkedHashMap>())).getOrDefault("latitude", ""));
-                        stationMetaDataItem.put("station_center_lon",
-                                ((LinkedHashMap) stationMetaDataItem.getOrDefault("center",
-                                        new LinkedHashMap<String, LinkedHashMap>())).getOrDefault("longitude", ""));
-                        stationMetaDataItem.remove("center");
-                        stationMetaDataItem.remove("bounds");
-
-                        receiver.output(KV.of((Integer) stationMetaDataItem.get("id"), stationMetaDataItem));
+                            receiver.output(KV.of((Integer) stationMetaDataItem.get("id"), stationMetaDataItem));
+                        }
                     }
+                } catch (IOException e) {
+                    e.printStackTrace();
+                } catch (NullPointerException e) {
+                    log.error("********ERROR – ExtractStationMetaDataFromJSON ******** :" + e);
                 }
-            } catch (IOException e) {
-                e.printStackTrace();
-            } catch (NullPointerException e) {
-                log.error("********ERROR – ExtractStationMetaDataFromJSON ******** :" + e);
             }
-        }
+        };
     }
 
+  
     /**
      * A PTransform that converts a PCollection containing lines of text into a PCollection of
      * LinkedHashMap with station availability data.
@@ -70,6 +80,7 @@ public class OsloCityBikeBasic {
         }
     }
 
+  
     /**
      * Options supported by {@link OsloCityBikeBasic}.
      *
@@ -117,7 +128,7 @@ public class OsloCityBikeBasic {
 
         PCollection <KV<Integer, LinkedHashMap>> stationMetadata = pipeline
                 .apply("ReadLines: StationMetadataInputFiles", TextIO.read().from(options.getStationMetadataInputFile()))
-                .apply(new StationMetadata());
+                .apply("Station Metadata", ParDo.of(fnExtractStationMetaDataFromJSON()));
 
         stationMetadata.apply(MapElements.into(TypeDescriptor.of(String.class)).via(o -> o.toString()))
                 .apply("WriteStationMetaData", TextIO.write().to(options.getMetadataOutput()));
