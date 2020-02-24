@@ -15,6 +15,7 @@ import org.apache.beam.sdk.transforms.ParDo;
 import org.apache.beam.sdk.transforms.SimpleFunction;
 import org.apache.beam.sdk.values.KV;
 import org.apache.beam.sdk.values.PCollection;
+import org.apache.beam.sdk.values.TypeDescriptor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -62,14 +63,24 @@ public class OsloCityBikeBasic {
         };
     }
 
-    /** A SimpleFunction that attempts to convert any objects into a printable string. */
-    public static class FormatAnythingAsTextFn extends SimpleFunction<Object, String> {
+  
+    /**
+     * A PTransform that converts a PCollection containing lines of text into a PCollection of
+     * LinkedHashMap with station availability data.
+     */
+    public static class StationMetadata extends PTransform<PCollection<String>, PCollection<KV<Integer, LinkedHashMap>>> {
         @Override
-        public String apply(Object input) {
-            return input.toString();
+        public PCollection<KV<Integer, LinkedHashMap>> expand(PCollection<String> elements) {
+
+            // Convert lines of text into LinkedHashMap.
+            PCollection<KV<Integer, LinkedHashMap>> stations = elements.apply(
+                    ParDo.of(new ExtractStationMetaDataFromJSON()));
+
+            return stations;
         }
     }
 
+  
     /**
      * Options supported by {@link OsloCityBikeBasic}.
      *
@@ -119,7 +130,7 @@ public class OsloCityBikeBasic {
                 .apply("ReadLines: StationMetadataInputFiles", TextIO.read().from(options.getStationMetadataInputFile()))
                 .apply("Station Metadata", ParDo.of(fnExtractStationMetaDataFromJSON()));
 
-        stationMetadata.apply(MapElements.via(new FormatAnythingAsTextFn()))
+        stationMetadata.apply(MapElements.into(TypeDescriptor.of(String.class)).via(o -> o.toString()))
                 .apply("WriteStationMetaData", TextIO.write().to(options.getMetadataOutput()));
         // RETURNS:
         // KV{157, {id=157, in_service=true, title=Nylandsveien, subtitle=mellom Norbygata og Urtegata, number_of_locks=30, station_center_lat=59.91562, station_center_lon=10.762248}}
